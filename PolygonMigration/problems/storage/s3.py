@@ -44,7 +44,7 @@ class S3Storage(StorageBackend):
             raise StorageError(f"Failed to upload {key} to bucket {self.bucket_name}: {e}") from e
         logger.info("Uploaded s3://%s/%s (%d bytes)", self.bucket_name, key, len(data))
 
-    def delete_prefix(self, prefix):
+    def delete_prefix(self, prefix, keep=None):
         deleted = 0
         try:
             paginator = self.client.get_paginator("list_objects_v2")
@@ -52,6 +52,7 @@ class S3Storage(StorageBackend):
                 obj["Key"]
                 for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
                 for obj in page.get("Contents", [])
+                if not keep or obj["Key"] not in keep
             ]
             for start in range(0, len(keys), _DELETE_BATCH_SIZE):
                 batch = keys[start:start + _DELETE_BATCH_SIZE]

@@ -31,10 +31,12 @@ class AzureBlobStorage(StorageBackend):
             raise StorageError(f"Failed to upload {key} to container {self.container_name}: {e}") from e
         logger.info("Uploaded azure://%s/%s (%d bytes)", self.container_name, key, len(data))
 
-    def delete_prefix(self, prefix):
+    def delete_prefix(self, prefix, keep=None):
         deleted = 0
         try:
             for blob in self.container_client.list_blobs(name_starts_with=prefix):
+                if keep and blob.name in keep:
+                    continue
                 self.container_client.delete_blob(blob.name)
                 deleted += 1
         except AzureError as e:

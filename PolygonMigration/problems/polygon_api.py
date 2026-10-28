@@ -745,23 +745,28 @@ class PolygonAPI:
         problem_id_for_naming = db_problem_id if db_problem_id is not None else problem_id
         logger.info("Using problem_id_for_naming: %s", problem_id_for_naming)
         
-        # Delete all test cases before updating the new ones
-        logger.info("Deleting existing test cases from Azure")
-        storage.delete_prefix(storage_paths.problem_prefix(problem_id_for_naming))
-
+        # Upload first (overwriting files with the same name), and only remove leftover
+        # files once every upload has succeeded, so a failure never loses existing tests.
         uploaded_count = 0
+        uploaded_keys = set()
         for idx, test in enumerate(test_cases, start=1):
             input_data = test.get('input', '')
             output_data = test.get('output', '')
             if input_data and output_data:
                 # Use database problem ID if provided, otherwise fall back to polygon_id
-                storage.upload(storage_paths.test_input_key(problem_id_for_naming, idx), input_data.encode('utf-8'))
-                storage.upload(storage_paths.test_output_key(problem_id_for_naming, idx), output_data.encode('utf-8'))
+                input_key = storage_paths.test_input_key(problem_id_for_naming, idx)
+                output_key = storage_paths.test_output_key(problem_id_for_naming, idx)
+                storage.upload(input_key, input_data.encode('utf-8'))
+                storage.upload(output_key, output_data.encode('utf-8'))
+                uploaded_keys.update((input_key, output_key))
                 uploaded_count += 1
             else:
                 logger.warning(f"Skipping test case #{idx}: missing input or output. input: {repr(input_data[:50] + ('...' if len(input_data) > 50 else ''))}, output: {repr(output_data[:50] + ('...' if len(output_data) > 50 else ''))}")
         
         logger.info("Uploaded %d test cases to Azure", uploaded_count)
+
+        logger.info("Deleting leftover files from the previous migration")
+        storage.delete_prefix(storage_paths.problem_prefix(problem_id_for_naming), keep=uploaded_keys)
         
         # Handle custom checker if present
         logger.info("Starting custom checker processing for problem %s", problem_id)
