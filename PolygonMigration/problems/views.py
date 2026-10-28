@@ -192,7 +192,7 @@ def index(request):
                         problem_obj = Problem.objects.filter(polygon_id=polygon_id).first()
                         if not problem_obj:
                             logger.warning('Problem with Polygon ID %s not in DB', polygon_id)
-                            context['error'] = f"Problem with Polygon ID {polygon_id} has not been migrated to the database yet. Please migrate the problem to the database first before migrating test cases to Azure."
+                            context['error'] = f"Problem with Polygon ID {polygon_id} has not been migrated to the database yet. Please migrate the problem to the database first before uploading test cases to cloud storage."
                             return render(request, 'problems/index.html', context)
                         
                         # Problem exists in database, proceed with Azure migration
@@ -216,7 +216,7 @@ def index(request):
                         custom_checker_info = api.get_custom_checker_info(polygon_id)
                         if custom_checker_info:
                             logger.info('Custom checker detected before Azure migration: %s', custom_checker_info)
-                            context['info'] = f"Custom checker '{custom_checker_info['name']}' detected. Will be compiled and uploaded to Azure."
+                            context['info'] = f"Custom checker '{custom_checker_info['name']}' detected. Will be compiled and uploaded to cloud storage."
                         
                         logger.info('Calling migrate_to_azure_blob')
                         try:
@@ -236,11 +236,11 @@ def index(request):
                             logger.error('Azure migration failed: %s', e, exc_info=True)
                             # Compensate: attempt to delete any uploaded blobs if possible (pseudo-code, implement as needed)
                             # api.delete_azure_blob(problem_id)
-                            context['error'] = f"Azure migration failed: {str(e)}"
+                            context['error'] = f"Cloud storage upload failed: {str(e)}"
                             raise
                         logger.info('Azure migration completed successfully')
                         
-                        success_message = "Test cases migrated to Azure Blob Storage successfully."
+                        success_message = "Test cases uploaded to cloud storage successfully."
                         if custom_checker_info:
                             success_message += f" Custom checker '{custom_checker_info['name']}' was also compiled and uploaded."
                         context['success'] = success_message

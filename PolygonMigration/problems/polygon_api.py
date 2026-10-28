@@ -11,6 +11,7 @@ import sys
 import zipfile
 import tempfile
 import redis
+from problems.storage import get_storage_backend, paths as storage_paths
 import logging
 import shutil
 import subprocess
@@ -581,9 +582,6 @@ class PolygonAPI:
             container_name (str): Azure Blob container name.
             db_problem_id (str, optional): The database problem ID for naming. Defaults to None.
         """
-        sys.path.append('.')
-        from problems.AzureTestcase import AzureBlobManager
-        
         logger.info("Processing custom checker for problem %s", problem_id)
         
         # Get custom checker info
@@ -604,14 +602,8 @@ class PolygonAPI:
         
         # Use CUSTOM_CHECKER_DIR from environment if available
         checker_dir = settings.CUSTOM_CHECKER_DIR
-        logger.info("Initializing Azure Blob Manager for custom checker upload")
-        blob_manager = AzureBlobManager(
-            account_url=azure_account_url,
-            tenant_id=azure_tenant_id,
-            client_id=azure_client_id,
-            username=azure_username,
-            password=azure_password
-        )
+        logger.info("Initializing storage backend for custom checker upload")
+        storage = get_storage_backend()
         
         if checker_dir:
             if not os.path.exists(checker_dir):
@@ -627,11 +619,7 @@ class PolygonAPI:
                     problem_id_for_naming = db_problem_id if db_problem_id is not None else problem_id
                     blob_name = f"test_cases/{problem_id_for_naming}/custom_checker.cpp"
                                         
-                    blob_client = blob_manager.blob_service_client.get_blob_client(
-                        container=container_name, 
-                        blob=blob_name
-                    )
-                    blob_client.upload_blob(source_code.encode('utf-8'), overwrite=True)
+                    storage.upload(blob_name, source_code.encode('utf-8'))
                     logger.info(f"Uploaded custom checker source code to {blob_name}")
                     return
                 except Exception as e:
@@ -662,11 +650,7 @@ class PolygonAPI:
             logger.info("Uploading custom checker to blob: %s", blob_name)
             
             try:
-                blob_client = blob_manager.blob_service_client.get_blob_client(
-                    container=container_name, 
-                    blob=blob_name
-                )
-                blob_client.upload_blob(binary_data, overwrite=True)
+                storage.upload(blob_name, binary_data)
                 logger.info(f"Successfully uploaded custom checker to {blob_name}")
             except Exception as e:
                 logger.error(f"Error uploading custom checker: {e}")
@@ -685,11 +669,7 @@ class PolygonAPI:
                         problem_id_for_naming = db_problem_id if db_problem_id is not None else problem_id
                         blob_name = f"test_cases/{problem_id_for_naming}/custom_checker.cpp"
                                             
-                        blob_client = blob_manager.blob_service_client.get_blob_client(
-                            container=container_name, 
-                            blob=blob_name
-                        )
-                        blob_client.upload_blob(source_code.encode('utf-8'), overwrite=True)
+                        storage.upload(blob_name, source_code.encode('utf-8'))
                         logger.info(f"Uploaded custom checker source code to {blob_name}")
                         return
                     except Exception as e:
@@ -720,11 +700,7 @@ class PolygonAPI:
                 logger.info("Uploading custom checker to blob: %s", blob_name)
                 
                 try:
-                    blob_client = blob_manager.blob_service_client.get_blob_client(
-                        container=container_name, 
-                        blob=blob_name
-                    )
-                    blob_client.upload_blob(binary_data, overwrite=True)
+                    storage.upload(blob_name, binary_data)
                     logger.info(f"Successfully uploaded custom checker to {blob_name}")
                 except Exception as e:
                     logger.error(f"Error uploading custom checker: {e}")
@@ -733,7 +709,7 @@ class PolygonAPI:
 
     def migrate_to_azure_blob(self, problem_id, azure_account_url, azure_tenant_id, azure_client_id, azure_username, azure_password, container_name, db_problem_id=None, testset='tests'):
         """
-        Fetches all test cases from Redis (or Polygon as fallback) and uploads them to Azure Blob Storage using AzureBlobManager.
+        Fetches all test cases from Redis (or Polygon as fallback) and uploads them to the configured cloud storage (see problems.storage).
         Each test case's input and output are uploaded as separate blobs.
         Only test cases with both input and output are uploaded.
         Also handles custom checker compilation and upload if present.
@@ -749,9 +725,6 @@ class PolygonAPI:
             db_problem_id (str, optional): The database problem ID for naming. Defaults to None.
             testset (str, optional): The testset name. Defaults to 'tests'.
         """
-        sys.path.append('.')  # Ensure root dir is in path for import
-        from problems.AzureTestcase import AzureBlobManager
-
         logger.info("Starting migrate_to_azure_blob for problem %s", problem_id)
 
         # Try to get test cases from Redis first
@@ -767,20 +740,14 @@ class PolygonAPI:
         
         logger.info("Retrieved %d test cases for Azure migration", len(test_cases))
 
-        blob_manager = AzureBlobManager(
-            account_url=azure_account_url,
-            tenant_id=azure_tenant_id,
-            client_id=azure_client_id,
-            username=azure_username,
-            password=azure_password
-        )
+        storage = get_storage_backend()
 
         problem_id_for_naming = db_problem_id if db_problem_id is not None else problem_id
         logger.info("Using problem_id_for_naming: %s", problem_id_for_naming)
         
         # Delete all test cases before updating the new ones
         logger.info("Deleting existing test cases from Azure")
-        blob_manager.empty_blob(container_name, problem_id_for_naming)
+        storage.delete_prefix(storage_paths.problem_prefix(problem_id_for_naming))
 
         uploaded_count = 0
         for idx, test in enumerate(test_cases, start=1):
@@ -788,7 +755,8 @@ class PolygonAPI:
             output_data = test.get('output', '')
             if input_data and output_data:
                 # Use database problem ID if provided, otherwise fall back to polygon_id
-                blob_manager.upload_test_case(container_name, problem_id_for_naming, idx, input_data, output_data)
+                storage.upload(storage_paths.test_input_key(problem_id_for_naming, idx), input_data.encode('utf-8'))
+                storage.upload(storage_paths.test_output_key(problem_id_for_naming, idx), output_data.encode('utf-8'))
                 uploaded_count += 1
             else:
                 logger.warning(f"Skipping test case #{idx}: missing input or output. input: {repr(input_data[:50] + ('...' if len(input_data) > 50 else ''))}, output: {repr(output_data[:50] + ('...' if len(output_data) > 50 else ''))}")
