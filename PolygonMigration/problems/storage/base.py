@@ -34,12 +34,13 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
-    def delete_prefix(self, prefix):
+    def delete_prefix(self, prefix, keep=None):
         """
-        Deletes every object whose key starts with ``prefix``.
+        Deletes every object whose key starts with ``prefix``, except those in ``keep``.
 
         Args:
             prefix (str): Key prefix, e.g. ``test_cases/7/``.
+            keep (set[str], optional): Keys to leave in place.
 
         Returns:
             int: Number of objects deleted.
